@@ -1,11 +1,23 @@
 
 import json
-from fastapi import FastAPI, Response, status
+import os
+
+from typing import Union, Dict, List
+
+from fastapi import FastAPI, Response, status, Header
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, inspect, select, schema, func
 from sqlalchemy.engine import reflection
+from dotenv import load_dotenv
 
-from typing import Union, Dict, List
+load_dotenv()
+
+try:
+    API_TOKEN = os.environ["API_TOKEN"]
+except KeyError:
+    raise Exception("No API_TOKEN provided as environment variable") from None
+
 
 class DiffInput(BaseModel):
 
@@ -143,10 +155,23 @@ async def get_columns_data(table_1_cols, table_2_cols):
     return column_out
 
 
-@app.get("/api/getAvailableMetrics")
-async def get_available_metrics():
+@app.get(
+    "/api/getAvailableMetrics"
+)
+async def get_available_metrics(
+    x_api_token: str = Header(""),
+):
 
-    return ["mean", "stddev"]
+    if x_api_token != API_TOKEN:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "Authentication failure"}
+        )
+    
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=["mean", "stddev"]
+    )
 
 
 class AvailableColumnsInput(BaseModel):
@@ -160,7 +185,13 @@ class AvailableColumnsInput(BaseModel):
 async def get_available_columns(
     payload: AvailableColumnsInput,
     response: Response,
+    x_api_token: str = Header(""), # X-API-TOKEN
 ):
+
+    if x_api_token != API_TOKEN:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"error": "Authentication failure"}
+
     conn_1 = payload.conn_1
     conn_2 = payload.conn_2
     table_1 = payload.table_1
@@ -234,9 +265,14 @@ async def get_available_columns(
 @app.post("/api/getTableDiff/")
 async def get_table_diff(
                 payload: DiffInput, 
-                response: Response
+                response: Response,
+                x_api_token: str = Header("")
 ):
     
+    if x_api_token != API_TOKEN:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"error": "Authentication failure"}
+
     conn_1 = payload.conn_1
     conn_2 = payload.conn_2
     table_1 = payload.table_1
@@ -271,7 +307,7 @@ async def get_table_diff(
     numeric_columns = set()
     text_columns = set()
 
-    # check for alphanumeric columns, as we only want to analyze those.
+    # check for alphanumeric columns, we only want to analyze those.
 
     for column_data in common_columns_same_type:
         for column_name, column_type in column_data.items():

@@ -170,7 +170,7 @@ async def get_available_metrics(
     
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content=["mean", "stddev"]
+        content=["mean", "stddev", "column_type", "row_count"]
     )
 
 

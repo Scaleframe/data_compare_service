@@ -1,15 +1,19 @@
 
 import json
 import os
+import secrets
 
 from typing import Union, Dict, List
 
-from fastapi import FastAPI, Response, status, Header
+
+from fastapi import FastAPI, Response, status, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, inspect, select, schema, func
 from sqlalchemy.engine import reflection
 from dotenv import load_dotenv
+from starlette.background import BackgroundTask
+from starlette.responses import JSONResponse as starlette_JSONResponse
 
 load_dotenv()
 
@@ -19,13 +23,51 @@ except KeyError:
     raise Exception("No API_TOKEN provided as environment variable") from None
 
 
+RESULTS_FILE = "results.json"
+
+
+async def write_to_results_file(
+    request_id: str,
+    status: str,
+    http_status_code: int,
+    response: Union[List, Dict],
+):
+    try:
+        with open(RESULTS_FILE, "r") as f:
+            try:
+                content = json.load(f)
+            except json.JSONDecodeError:
+                content = {}
+    except FileNotFoundError:
+        content = {}
+
+    content[request_id] = {
+        "status": status,
+        "http_status_code": http_status_code,
+        "response": response
+    }
+
+    with open(RESULTS_FILE, "w") as f:
+        json.dump(content, f)
+
+    return None
+
+
+async def get_request_id():
+    return secrets.token_hex(10)
+
+
+# [
+# {"request_id": {
+# "status": :running", "http_status_code":404, "respnse": ...}}
+# ]
+
 class DiffInput(BaseModel):
 
     conn_1: str
     conn_2: str
     table_1: str
     table_2: str
-
 
 
 app = FastAPI()
@@ -261,40 +303,45 @@ async def get_available_columns(
     return output
 
 
-# # get table diff
-@app.post("/api/getTableDiff/")
-async def get_table_diff(
-                payload: DiffInput, 
-                response: Response,
-                x_api_token: str = Header("")
-):
-    
-    if x_api_token != API_TOKEN:
-        response.status_code = status.HTTP_401_UNAUTHORIZED
-        return {"error": "Authentication failure"}
-
-    conn_1 = payload.conn_1
-    conn_2 = payload.conn_2
-    table_1 = payload.table_1
-    table_2 = payload.table_2
+async def process_table_data(conn_1, conn_2, table_1, table_2, request_id):
 
     engine_1 = await connect_database(conn_1)
     if not engine_1:
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Could not connect to DB with connection string {conn_1}"}
+        await write_to_results_file(
+            request_id=request_id,
+            status="completed",
+            http_status_code=status.HTTP_400_BAD_REQUEST,
+            response={"error": f"Could not connect to DB with connection string {conn_1}"}
+        )
+        return None
 
     engine_2 = await connect_database(conn_2)
     if not engine_2:
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Could not connect to DB with connection string {conn_2}"}
+        await write_to_results_file(
+            request_id=request_id,
+            status="completed",
+            http_status_code=status.HTTP_400_BAD_REQUEST,
+            response={"error": f"Could not connect to DB with connection string {conn_2}"}
+        )
+        return None
 
     if not await table_name_exists(engine_1, table_1):
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Table name {table_1} does not exist"}
+        await write_to_results_file(
+            request_id=request_id,
+            status="completed",
+            http_status_code=status.HTTP_400_BAD_REQUEST,
+            response={"error": f"Table name {table_1} does not exist"}
+        )
+        return None
     
     if not await table_name_exists(engine_2, table_2):
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Table name {table_2} does not exist"}
+        await write_to_results_file(
+            request_id=request_id,
+            status="completed",
+            http_status_code=status.HTTP_400_BAD_REQUEST,
+            response={"error": f"Table name {table_2} does not exist"}
+        )
+        return None
 
     table_1_obj, table_1_cols = await get_table_columns(engine_1, table_1)
     table_2_obj, table_2_cols = await get_table_columns(engine_2, table_2)
@@ -381,5 +428,81 @@ async def get_table_diff(
         table_2_metrics["metrics"]["row_count"]
     )
 
-    return final_output
-        
+    await write_to_results_file(
+            request_id=request_id,
+            status="completed",
+            http_status_code=status.HTTP_200_OK,
+            response=final_output
+        )
+    return None
+
+def foobar():
+    with open("DUMMY.txt", "w") as f:
+        f.write("dummmy")
+    print("here is this")
+
+
+# # get table diff
+@app.post("/api/getTableDiff/")
+async def get_table_diff(
+                payload: DiffInput, 
+                response: Response,
+                x_api_token: str = Header(""),
+):
+    
+    if x_api_token != API_TOKEN:
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"error": "Authentication failure"}
+
+    conn_1 = payload.conn_1
+    conn_2 = payload.conn_2
+    table_1 = payload.table_1
+    table_2 = payload.table_2
+
+    request_id = await get_request_id()
+
+    await write_to_results_file(
+        request_id=request_id,
+        status="running",
+        http_status_code=0,
+        response={},
+    )
+
+    task = BackgroundTask(
+        process_table_data, conn_1, conn_2, table_1, table_2, request_id
+    )
+
+    content = {
+        "message": f"Please visit /api/checkResponse/{request_id}/ to get the progess/response info"
+    }
+
+    return starlette_JSONResponse(content, background=task)
+
+@app.get("/api/checkResponse/{request_id}/")
+async def check_response(
+    request_id: str,
+    x_api_token: str = Header("")
+):
+
+    if x_api_token != API_TOKEN:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "Authentication failure"}
+        )
+
+    with open(RESULTS_FILE, "r") as f:
+        try:
+            content = json.load(f)
+        except json.JSONDecodeError:
+            content = {}
+
+        try:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=content[request_id],
+            )
+        except KeyError:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "No such request ID"}
+            )

@@ -33,7 +33,7 @@ app = FastAPI()
 
 async def connect_database(connection_string: str) -> "sqlalchemy.Engine":
     try:
-        engine = create_engine(connection_string, connect_args={"timeout": 30})
+        engine = create_engine(connection_string, connect_args={"timeout": 60})
     except Exception:
         return None
     return engine
@@ -245,21 +245,21 @@ async def get_available_columns(
     engine_1 = await connect_database(conn_1)
     if not engine_1:
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Could not connect to DB with connection string {conn_1}"}
+        return {"error": f"Could not connect to DB with the provided connection string."}
 
     if not await table_name_exists(engine_1, table_1):
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Table name {table_1} does not exist on {conn_1}"}
+        return {"error": f"Table name {table_1} does not exist."}
     
     if engine_2:
         engine_2 = await connect_database(conn_2)
         if not engine_2:
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"error": f"Could not connect to DB with connection string {conn_2}"}
+            return {"error": f"Could not connect to DB with the provided connection string"}
   
         if not await table_name_exists(engine_2, table_2):
             response.status_code = status.HTTP_400_BAD_REQUEST
-            return {"error": f"Table name {table_2} does not exist on {conn_2}"}
+            return {"error": f"Table name {table_2} does not exist."}
 
     if engine_2:
         output = {
@@ -412,12 +412,12 @@ async def get_table_diff(
     engine_1 = await connect_database(conn_1)
     if not engine_1:
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Could not connect to DB with connection string {conn_1}"}
+        return {"error": f"Could not connect to DB with the provided connection string."}
 
     engine_2 = await connect_database(conn_2)
     if not engine_2:
         response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": f"Could not connect to DB with connection string {conn_2}"}
+        return {"error": f"Could not connect to DB with the provided connection string."}
 
     if not await table_name_exists(engine_1, table_1):
         response.status_code = status.HTTP_400_BAD_REQUEST

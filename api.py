@@ -33,7 +33,7 @@ app = FastAPI()
 
 async def connect_database(connection_string: str) -> "sqlalchemy.Engine":
     try:
-        engine = create_engine(connection_string)
+        engine = create_engine(connection_string, connect_args={"timeout": 30})
     except Exception:
         return None
     return engine

@@ -3,6 +3,22 @@ Table Diff Service
 
 This service takes in two tables and returns a diff between them. 
 
+
+## Gettnig Started
+
+To run this locally, startup your favorite virtual environemnt and install the dependencies from the `requirements.txt` file. 
+
+`pip install -r requirements.txt`
+
+Next you'll need an API token to run the service. 
+
+Once you have that, create a file named `.env` in this project's root folder, and paste this in the file:
+
+`API_TOKEN=PASTE_TOKEN_VALUE_HERE`
+
+From there you should be good to get things running. 
+
+
 ## Endpoints
 
 ### POST `/api/getTableDiff/`
@@ -11,20 +27,25 @@ This endpoint takes in two connection strings and table paths, and return a diff
 
 #### Payload
 
+```
 {
     "conn_1": "db_connection_string_1",
     "table_1": "table from conn_1 to compare",
     "conn_2": "db_connection_string_2",
     "table_2": "table from conn_2 to compare"
 }
+```
 
 ##### Payload example:
 
+```
 {
-    "conn_1": "postgresql://username:password@hostname:port/dbname", "conn_2": "postgresql://username2:password2@hostname2:port/dbname", 
+    "conn_1": "postgresql://username:password@hostname:port/dbname", 
+    "conn_2": "postgresql://username2:password2@hostname2:port/dbname", 
     "table_1": "table_name_1", 
     "table_2": "table_name_2"
 }
+```
 
 #### Response
 
@@ -33,10 +54,10 @@ This endpoint takes in two connection strings and table paths, and return a diff
 For invalid connection strings or if the table does not exist.
 
 ###### Format:
-{"error": "description"}
+`{"error": "description"}`
 
 ###### Example:
-{"error": "Table name table_1_name does not exist on conn_1"}
+`{"error": "Table name table_1_name does not exist on conn_1"}`
 
 
 ##### 200

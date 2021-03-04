@@ -5,3 +5,4 @@ psycopg2-binary
 python-dotenv==0.15.0
 SQLAlchemy==1.3.16
 uvicorn
+snowflake-sqlalchemy==1.2.3

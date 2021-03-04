@@ -33,7 +33,7 @@ app = FastAPI()
 
 async def connect_database(connection_string: str) -> "sqlalchemy.Engine":
     try:
-        engine = create_engine(connection_string, connect_args={"timeout": 60})
+        engine = create_engine(connection_string)
     except Exception:
         return None
     return engine
@@ -49,7 +49,7 @@ async def table_name_exists(engine: "Engine", table_name: str) -> bool:
 
 async def get_table_columns(
     engine: "sqlalchemy.Engine", table_name: str
-) -> Tuple[Union["sqlalchemy.Table", List["sqlalchemy.Column"]]]:
+    ) -> Tuple[Union["sqlalchemy.Table", List["sqlalchemy.Column"]]]:
 
     metadata = schema.MetaData()
     metadata.reflect(bind=engine)
@@ -58,27 +58,36 @@ async def get_table_columns(
 
     return table, table.columns
 
-async def get_table_metrics(engine: "sqlalchemy.Engine", mean_stddev_pairs: List[Tuple], table_name: str) -> Dict[str, Dict[str, float]]:
-    # 
+async def get_table_metrics(
+    engine: "sqlalchemy.Engine", 
+    mean_stddev_pairs: List[Tuple], 
+    table_name: str
+    ) -> Dict[str, Dict[str, float]]:
+     
     select_query = [
         element
         for pair in mean_stddev_pairs
         for element in pair
     ]
-
+    
     statement = select(select_query) 
 
     connection = engine.connect()
 
+    
     try:
+        
         agg_result = dict(next(connection.execute(statement)))
     except Exception:
         agg_result = {}
-
+    
+    
     agg_result = {
         key: round(float(value), 2) for key, value in agg_result.items()
-    }
+    } #{'avg_rent_sqft_mean': 1.48526457913677,
 
+
+    
     quartile_map = {}
 
     for key, value in agg_result.items():
@@ -87,20 +96,21 @@ async def get_table_metrics(engine: "sqlalchemy.Engine", mean_stddev_pairs: List
             # ("nr_floors", "_", "quartile25")
 
             quartile_map.setdefault(column_name, {}).update({quartile: value})
-
     
     for column_name, quartile_data in quartile_map.items():
         agg_result[f"{column_name}_IQR"] = quartile_data["quartile75"] - quartile_data["quartile25"]
 
-    # agg_result_copy = agg_result.copy()
 
+    
     try:
         row_count = next(connection.execute(f"select count(*) from {table_name}"))[0]
     except Exception:
         row_count = 0
 
+    
     formatted_metrics = {"row_count": row_count}
 
+    
     for column_agg, value in agg_result.items():
         column_name, _, agg = column_agg.rpartition("_") # "column_1_mean" -> ("column_1", "_", "mean")
         if agg in formatted_metrics:
@@ -113,8 +123,8 @@ async def get_table_metrics(engine: "sqlalchemy.Engine", mean_stddev_pairs: List
 
 
 async def get_all_columns_info(
-    table_columns: Mapping[str, "sqlalchemy.Column"]
-) -> Dict[str, Union[List[str], Dict[str, "ColumnType"]]]:
+        table_columns: Mapping[str, "sqlalchemy.Column"]
+    ) -> Dict[str, Union[List[str], Dict[str, "ColumnType"]]]:
 
     col_name_type = {}  # {"col_1": "text", "col_2": "float"}
     numeric_cols = set()
@@ -133,7 +143,10 @@ async def get_all_columns_info(
     }
 
 
-async def get_columns_data(table_1_cols: Mapping[str, "sqlalchemy.Column"], table_2_cols: Mapping[str, "sqlalchemy.Column"]) -> Dict[str, List[str]]:
+async def get_columns_data(
+        table_1_cols: Mapping[str, "sqlalchemy.Column"], 
+        table_2_cols: Mapping[str, "sqlalchemy.Column"]
+    ) -> Dict[str, List[str]]:
 
     common_cols = set()
 
@@ -175,8 +188,8 @@ async def get_columns_data(table_1_cols: Mapping[str, "sqlalchemy.Column"], tabl
 
 @app.get("/api/getAvailableMetrics")
 async def get_available_metrics(
-    x_api_token: str = Header(""),
-):
+        x_api_token: str = Header(""),
+    ):
 
     if x_api_token != API_TOKEN:
         return JSONResponse(
@@ -198,8 +211,10 @@ class AvailableColumnsInput(BaseModel):
     table_2: str = ""
 
 async def _get_engines_conns_tables(
-    conn_1: str, conn_2: str, table_1: str, table_2: str
-) -> Tuple[str, bool]:
+        conn_1: str, conn_2: str, 
+        table_1: str, table_2: str
+    ) -> Tuple[str, bool]:
+    
     # Whether to process table_2
     engine_2 = True
 
@@ -224,10 +239,10 @@ async def _get_engines_conns_tables(
 
 @app.post("/api/getAvailableColumns")
 async def get_available_columns(
-    payload: AvailableColumnsInput,
-    response: Response,
-    x_api_token: str = Header(""), # X-API-TOKEN
-):
+        payload: AvailableColumnsInput,
+        response: Response,
+        x_api_token: str = Header("") # X-API-TOKEN
+    ):
 
     if x_api_token != API_TOKEN:
         response.status_code = status.HTTP_401_UNAUTHORIZED
@@ -291,7 +306,10 @@ class ColumnTypes(NamedTuple):
     text_columns: Set[str]
     numeric_columns: Set[str]
 
-async def _get_numeric_text_cols(common_columns_same_type: List[Mapping[str, "ColumnType"]]) -> ColumnTypes:
+async def _get_numeric_text_cols(
+        common_columns_same_type: List[Mapping[str, "ColumnType"]]
+    ) -> ColumnTypes:
+
     numeric_columns = set()
     text_columns = set()
 
@@ -310,8 +328,12 @@ async def _get_numeric_text_cols(common_columns_same_type: List[Mapping[str, "Co
 
 
 async def _get_table_metrics_wrapper(
-    engine: "Engine", table_obj: "sqlalchemy.Table", numeric_columns: Set[str], table_name: str
-) -> Dict[str, Dict[str, float]]:
+        engine: "Engine", 
+        table_obj: "sqlalchemy.Table", 
+        numeric_columns: Set[str], 
+        table_name: str
+    ) -> Dict[str, Dict[str, float]]:
+    
     cols_table = [
         (
             func.avg(getattr(table_obj.columns, column)).label(f"{column}_mean"),
@@ -332,9 +354,9 @@ async def _get_table_metrics_wrapper(
 
 
 async def _get_all_metrics_diff(
-    table_1_agg_metrics: Dict[str, float],
-    table_2_agg_metrics: Dict[str, float]
-) -> Dict[str, Dict[str, Dict[str, Union[str, float]]]]:
+        table_1_agg_metrics: Dict[str, float],
+        table_2_agg_metrics: Dict[str, float]
+    ) -> Dict[str, Dict[str, Dict[str, Union[str, float]]]]:
 
     metrics_diff = {
         "mean_diff": {},
@@ -355,7 +377,7 @@ async def _get_all_metrics_diff(
         try:
             diff_value_percent = round(
                 ((table_1_value - table_2_value) * 100) / table_1_value,
-                5
+                3
             )
         except ZeroDivisionError:
             diff_value_percent = "N/A"
@@ -395,10 +417,10 @@ async def _get_all_metrics_diff(
 # # get table diff
 @app.post("/api/getTableDiff/")
 async def get_table_diff(
-                payload: DiffInput, 
-                response: Response,
-                x_api_token: str = Header("")
-):
+        payload: DiffInput, 
+        response: Response,
+        x_api_token: str = Header("")
+    ):
     
     if x_api_token != API_TOKEN:
         response.status_code = status.HTTP_401_UNAUTHORIZED

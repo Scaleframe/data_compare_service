@@ -331,8 +331,13 @@ async def _get_numeric_text_cols(
     for column_data in common_columns_same_type:
         for column_name, column_type in column_data.items():
             column_type = column_type.casefold()
-            if "float" in column_type or "integer" in column_type or (
-                "double precision" in column_type and "[]" not in column_type
+            if (
+                "float" in column_type or
+                "integer" in column_type or
+                "decimal" in column_type or 
+                (
+                    "double precision" in column_type and "[]" not in column_type
+                )
             ):
                 numeric_columns.add(column_name)
             elif "char" in column_type or "text" in column_type:

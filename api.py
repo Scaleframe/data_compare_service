@@ -2,7 +2,7 @@
 import json
 import os
 
-from typing import Union, Dict, List, Tuple, Optional, Mapping, NamedTuple, Set
+from typing import Union, Dict, List, Tuple, Optional, Mapping, NamedTuple, Set, Iterable
 
 from fastapi import FastAPI, Response, status, Header
 from fastapi.responses import JSONResponse
@@ -17,6 +17,18 @@ try:
     API_TOKEN = os.environ["API_TOKEN"]
 except KeyError:
     raise Exception("No API_TOKEN provided as environment variable") from None
+
+
+MEAN_DIFF_THRESHOLD = 5  # percent
+STDDEV_DIFF_THRESHOLD = 5  # percent
+IQR_DIFF_THRESHOLD = 10  # percent
+
+DIFF_THRESHOLD_MAP = {
+    "mean_diff": MEAN_DIFF_THRESHOLD,
+    'stddev_diff': STDDEV_DIFF_THRESHOLD,
+    "quartiles_diff": IQR_DIFF_THRESHOLD,
+}
+
 
 
 class DiffInput(BaseModel):
@@ -40,19 +52,21 @@ async def connect_database(connection_string: str) -> "sqlalchemy.Engine":
 
 async def table_name_exists(engine: "Engine", table_name: str) -> bool:
 
+    metadata = schema.MetaData()
+
     try:
-        inspector = inspect(engine)
+        metadata.reflect(bind=engine, only=[table_name])
     except Exception:
         return False
 
-    return table_name in inspector.get_table_names()
+    return table_name in metadata.tables
 
 async def get_table_columns(
     engine: "sqlalchemy.Engine", table_name: str
     ) -> Tuple[Union["sqlalchemy.Table", List["sqlalchemy.Column"]]]:
 
     metadata = schema.MetaData()
-    metadata.reflect(bind=engine)
+    metadata.reflect(bind=engine, only=[table_name])
 
     table = metadata.tables[table_name]  # metadata.tables = {"table_name": "reflected_table_object"}
 
@@ -313,7 +327,7 @@ async def _get_numeric_text_cols(
     numeric_columns = set()
     text_columns = set()
 
-    # check for alphanumeric columns, we only want to analyze those.
+    # check for alphanumeric columns, we only want to analyze those for now.
     for column_data in common_columns_same_type:
         for column_name, column_type in column_data.items():
             column_type = column_type.casefold()
@@ -414,6 +428,68 @@ async def _get_all_metrics_diff(
 
     return metrics_diff
 
+async def get_summary_diff(
+    final_output: Dict[str, Dict[str, Dict]],
+    numeric_columns: Iterable,
+):
+
+    common_columns_different_type = (
+        final_output["columns_data"]["common_columns_different_type"]
+    )
+    common_columns_different_type = {
+        column_name: value
+        for inner_dict in common_columns_different_type
+        for column_name, value in inner_dict.items()
+    }
+
+    columns = set(numeric_columns) | set(common_columns_different_type)
+
+    metrics_diff = final_output["metrics_diff"]
+
+    changed_columns = {}
+
+    for column in columns:
+        if column in common_columns_different_type:
+            changed_columns.setdefault(column, {}).update(
+                column_type_changed=common_columns_different_type[column]
+            )
+
+        for agg_diff, value_dict in metrics_diff.items():
+
+            if not isinstance(value_dict, dict):
+                continue
+            
+            if agg_diff == "quartiles_diff":
+                value_dict = value_dict["IQR"]
+
+            for column_name, diff_dict in value_dict.items():
+                if column_name == column:
+                    percent_value_str = diff_dict["percent"]
+                    try:
+                        percent_value = round(
+                            abs(
+                                float(percent_value_str.strip("%"))
+                            )
+                            , 5
+                        )
+                    except (TypeError, ValueError):
+                        percent_value = -1
+
+                    if percent_value >= DIFF_THRESHOLD_MAP[agg_diff]:
+                        _agg_diff = "IQR_diff" if agg_diff == "quartiles_diff" else agg_diff
+                        changed_columns.setdefault(
+                            column, {}
+                        ).update(
+                            {
+                            f"{_agg_diff}_out_of_range": percent_value_str
+                            }
+                        )
+                    continue
+
+    return {"changed_columns": changed_columns}
+
+
+
 # # get table diff
 @app.post("/api/getTableDiff/")
 async def get_table_diff(
@@ -468,6 +544,7 @@ async def get_table_diff(
         rows_data={},
     )
     
+    
     table_1_metrics = await _get_table_metrics_wrapper(
         engine=engine_1,
         table_obj=table_1_obj,
@@ -491,11 +568,14 @@ async def get_table_diff(
         table_1_agg_metrics,
         table_2_agg_metrics,
     )
-
+    
     final_output["metrics_diff"]["row_count_diff"] = (
         table_1_metrics["metrics"]["row_count"] -
         table_2_metrics["metrics"]["row_count"]
     )
-
+    # breakpoint()
+    final_output["diff_summary"] = await get_summary_diff(
+        final_output, numeric_columns
+    )
     return final_output
         

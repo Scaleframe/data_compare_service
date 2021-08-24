@@ -4,7 +4,7 @@ Table Diff Service
 This service takes in two tables and returns a diff between them. 
 
 
-## Gettnig Started
+## Getting Started
 
 To run this locally, startup your favorite virtual environemnt and install the dependencies from the `requirements.txt` file. 
 
